@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Room Guardian — Occupancy Auto-Shutoff Simulation</title>
+<style>
+  :root {
+    --bg: #14181f;
+    --panel: #1d232c;
+    --panel-raised: #242b35;
+    --line: #323b47;
+    --text: #e7ebf0;
+    --text-dim: #8b96a5;
+    --amber: #e2a339;
+    --amber-dim: #6b5730;
+    --teal: #4fd1b8;
+    --teal-dim: #2c5850;
+    --red: #d9695a;
+    --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #f2f0ea;
+    --panel: #ffffff;
+    --panel-raised: #fbfaf7;
+    --line: #ddd8cc;
+    --text: #23262b;
+    --text-dim: #6b6a63;
+    --amber: #b5791f;
+    --amber-dim: #f0dcb4;
+    --teal: #1f8f79;
+    --teal-dim: #cdeee7;
+    --red: #b5453a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f2f0ea;
+      --panel: #ffffff;
+      --panel-raised: #fbfaf7;
+      --line: #ddd8cc;
+      --text: #23262b;
+      --text-dim: #6b6a63;
+      --amber: #b5791f;
+      --amber-dim: #f0dcb4;
+      --teal: #1f8f79;
+      --teal-dim: #cdeee7;
+      --red: #b5453a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    padding: 32px 20px 64px;
+    min-height: 100vh;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 650;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+
+  .sub {
+    color: var(--text-dim);
+    font-size: 0.92rem;
+    margin: 0;
+    max-width: 46ch;
+  }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: var(--panel-raised);
+    border: 1px solid var(--line);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 8px var(--teal);
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .dot.empty {
+    background: var(--red);
+    box-shadow: 0 0 8px var(--red);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 680px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px;
+  }
+
+  .card h2 {
+    font-size: 0.78rem;
+    text-transform: none;
+    letter-spacing: 0.01em;
+    color: var(--text-dim);
+    margin: 0 0 16px;
+    font-weight: 600;
+  }
+
+  /* Room card */
+  .room {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .appliance-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--panel-raised);
+    border: 1px solid var(--line);
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .appliance-row.on {
+    border-color: var(--amber-dim);
+  }
+
+  .appliance-icon {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--bg);
+    font-size: 1.15rem;
+    filter: grayscale(1) opacity(0.4);
+    transition: filter 0.3s;
+  }
+  .appliance-row.on .appliance-icon {
+    filter: grayscale(0) opacity(1);
+    box-shadow: 0 0 14px var(--amber-dim);
+  }
+
+  .appliance-info { flex: 1; min-width: 0; }
+  .appliance-name { font-size: 0.94rem; font-weight: 550; }
+  .appliance-state {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+  .appliance-row.on .appliance-state { color: var(--amber); }
+
+  .toggle-switch {
+    width: 40px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--line);
+    position: relative;
+    flex: none;
+    transition: background 0.3s;
+  }
+  .appliance-row.on .toggle-switch { background: var(--amber); }
+  .toggle-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--panel);
+    transition: transform 0.3s;
+  }
+  .appliance-row.on .toggle-switch::after { transform: translateX(18px); }
+
+  /* Control card */
+  .presence-btn {
+    width: 100%;
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--panel-raised);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: background 0.25s, border-color 0.25s, transform 0.08s;
+  }
+  .presence-btn:active { transform: scale(0.99); }
+  .presence-btn.present {
+    background: var(--teal-dim);
+    border-color: var(--teal);
+    color: var(--teal);
+  }
+  .presence-btn.away {
+    background: var(--panel-raised);
+  }
+
+  .timer-block {
+    margin-top: 18px;
+    text-align: center;
+  }
+  .timer-label {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .timer-value {
+    font-family: var(--font-mono);
+    font-size: 2.1rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+  .timer-value.counting { color: var(--red); }
+  .timer-value.idle { color: var(--teal); }
+
+  .progress-track {
+    margin-top: 12px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--panel-raised);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--red);
+    width: 0%;
+    transition: width 0.2s linear, background 0.3s;
+  }
+
+  .setting-row {
+    margin-top: 22px;
+  }
+  .setting-row label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .setting-row output {
+    color: var(--text);
+    font-family: var(--font-mono);
+  }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--amber);
+  }
+
+  .log-card {
+    margin-top: 20px;
+  }
+  .log-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 168px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+  .log-list li {
+    font-size: 0.83rem;
+    color: var(--text-dim);
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--line);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .log-list li:first-child { border-bottom: none; padding-bottom: 0; }
+  .log-list time {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    flex: none;
+    color: var(--text-dim);
+  }
+  .log-list .msg { color: var(--text); }
+
+  footer {
+    margin-top: 28px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>Room Guardian</h1>
+      <p class="sub">A software model of the PIR-sensor auto-shutoff. Toggle occupancy and watch the same logic your microcontroller would run.</p>
+    </div>
+    <div class="status-pill">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Room occupied</span>
+    </div>
+  </header>
+
+  <div class="grid">
+
+    <!-- Room / appliances -->
+    <div class="card room">
+      <h2>Room appliances</h2>
+      <div class="appliance-row on" data-name="Ceiling light">
+        <div class="appliance-icon">💡</div>
+        <div class="appliance-info">
+          <div class="appliance-name">Ceiling light</div>
+          <div class="appliance-state">On</div>
+        </div>
+        <div class="toggle-switch"></div>
+      </div>
+      <div class="appliance-row on" data-name="Fan">
+        <div class="appliance-icon">🌀</div>
+        <div class="appliance-info">
+          <div class="appliance-name">Fan</div>
+          <div class="appliance-state">On</div>
+        </div>
+        <div class="toggle-switch"></div>
+      </div>
+      <div class="appliance-row on" data-name="TV">
+        <div class="appliance-icon">📺</div>
+        <div class="appliance-info">
+          <div class="appliance-name">TV</div>
+          <div class="appliance-state">On</div>
+        </div>
+        <div class="toggle-switch"></div>
+      </div>
+      <div class="appliance-row on" data-name="Space heater">
+        <div class="appliance-icon">🔥</div>
+        <div class="appliance-info">
+          <div class="appliance-name">Space heater</div>
+          <div class="appliance-state">On</div>
+        </div>
+        <div class="toggle-switch"></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div>
+      <div class="card">
+        <h2>PIR sensor (simulated)</h2>
+        <button class="presence-btn present" id="presenceBtn">🧍 Someone is in the room</button>
+
+        <div class="timer-block">
+          <div class="timer-label" id="timerLabel">Sensor sees motion</div>
+          <div class="timer-value idle" id="timerValue">--:--</div>
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+
+        <div class="setting-row">
+          <label>Shutoff delay after room is empty <output id="delayOut">10s</output></label>
+          <input type="range" id="delaySlider" min="3" max="30" value="10" step="1">
+        </div>
+      </div>
+
+      <div class="card log-card">
+        <h2>Event log</h2>
+        <ul class="log-list" id="logList"></ul>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>Demo timescale: seconds here stand in for the minutes you'd set on a real sensor (e.g. a 10s delay ≈ a 10 minute real-world timeout).</footer>
+</div>
+
+<script>
+(function () {
+  const presenceBtn = document.getElementById('presenceBtn');
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const timerLabel = document.getElementById('timerLabel');
+  const timerValue = document.getElementById('timerValue');
+  const progressFill = document.getElementById('progressFill');
+  const delaySlider = document.getElementById('delaySlider');
+  const delayOut = document.getElementById('delayOut');
+  const logList = document.getElementById('logList');
+  const applianceRows = Array.from(document.querySelectorAll('.appliance-row'));
+
+  let present = true;
+  let emptySince = null;      // timestamp when room became empty
+  let shutoffDelayMs = Number(delaySlider.value) * 1000;
+  let appliancesOn = true;
+
+  function addLog(msg) {
+    const li = document.createElement('li');
+    const time = document.createElement('time');
+    const now = new Date();
+    time.textContent = now.toLocaleTimeString([], { hour12: false });
+    const span = document.createElement('span');
+    span.className = 'msg';
+    span.textContent = msg;
+    li.appendChild(time);
+    li.appendChild(span);
+    logList.appendChild(li);
+    // cap log length
+    while (logList.children.length > 30) logList.removeChild(logList.firstChild);
+  }
+
+  function setAppliances(on) {
+    if (on === appliancesOn) return;
+    appliancesOn = on;
+    applianceRows.forEach(row => {
+      row.classList.toggle('on', on);
+      row.querySelector('.appliance-state').textContent = on ? 'On' : 'Off';
+    });
+    addLog(on ? 'Motion detected — appliances turned ON' : 'Room empty too long — appliances turned OFF');
+  }
+
+  function updatePresenceUI() {
+    presenceBtn.classList.toggle('present', present);
+    presenceBtn.classList.toggle('away', !present);
+    presenceBtn.textContent = present ? '🧍 Someone is in the room' : '🚪 Room is empty';
+    statusDot.classList.toggle('empty', !present);
+    statusText.textContent = present ? 'Room occupied' : 'Room empty';
+  }
+
+  presenceBtn.addEventListener('click', () => {
+    present = !present;
+    if (present) {
+      emptySince = null;
+      setAppliances(true);
+      addLog('Motion detected by sensor');
+    } else {
+      emptySince = Date.now();
+      addLog('No motion — starting shutoff countdown');
+    }
+    updatePresenceUI();
+  });
+
+  delaySlider.addEventListener('input', () => {
+    shutoffDelayMs = Number(delaySlider.value) * 1000;
+    delayOut.textContent = delaySlider.value + 's';
+  });
+
+  function tick() {
+    if (present) {
+      timerLabel.textContent = 'Sensor sees motion';
+      timerValue.textContent = '--:--';
+      timerValue.classList.remove('counting');
+      timerValue.classList.add('idle');
+      progressFill.style.width = '0%';
+    } else {
+      const elapsed = Date.now() - emptySince;
+      const remaining = Math.max(0, shutoffDelayMs - elapsed);
+      const secs = Math.ceil(remaining / 1000);
+      timerLabel.textContent = remaining > 0 ? 'Turning off appliances in' : 'Appliances are off';
+      timerValue.textContent = remaining > 0 ? ('00:' + String(secs).padStart(2, '0')) : '00:00';
+      timerValue.classList.toggle('counting', remaining > 0);
+      timerValue.classList.toggle('idle', remaining <= 0);
+      const pct = Math.min(100, (elapsed / shutoffDelayMs) * 100);
+      progressFill.style.width = pct + '%';
+
+      if (remaining <= 0) {
+        setAppliances(false);
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  addLog('Simulation started — room occupied');
+  updatePresenceUI();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
